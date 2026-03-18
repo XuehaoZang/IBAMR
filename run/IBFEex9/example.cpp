@@ -62,11 +62,11 @@ void
 tether_force_function(VectorValue<double>& F,
                       const TensorValue<double>& /*FF*/,
                       const libMesh::Point& x_bndry, // x_bndry gives current   coordinates on the boundary mesh
-                      const libMesh::Point& X_bndry, // X_bndry gives reference coordinates on the boundary mesh
+                      const libMesh::Point& X_ref, // X_bndry(X_ref) gives reference coordinates on the boundary mesh
                       Elem* const elem,
                       const vector<const vector<double>*>& var_data,
                       const vector<const vector<VectorValue<double> >*>& /*grad_var_data*/,
-                      double current_time,
+                      double t,
                       void* /*ctx*/)
 {
     // // tether_force_function() is called on elements of the boundary mesh.  Here
@@ -74,55 +74,76 @@ tether_force_function(VectorValue<double>& F,
     // // element was extracted from.
     // const Elem* const interior_parent = elem->interior_parent();
 
-    // // We define "arbitrary" velocity and displacement fields on the solid mesh.
-    // // Here we look up their values.
-    // std::vector<double> x_solid(NDIM, 0.0), u_solid(NDIM, 0.0);
-    // for (unsigned int d = 0; d < NDIM; ++d)
-    // {
-    //     x_solid[d] = x_solid_system->point_value(d, X_bndry, interior_parent);
-    //     u_solid[d] = u_solid_system->point_value(d, X_bndry, interior_parent);
-    // }
-
-    // // Look up the velocity of the boundary mesh.
-    // const std::vector<double>& u_bndry = *var_data[0];
-
-    // // The tether force is proportional to the mismatch between the positions
-    // // and velocities.
-    // for (unsigned int d = 0; d < NDIM; ++d)
-    // {
-    //     F(d) = kappa_s * (x_solid[d] - x_bndry(d)) + eta_s * (u_solid[d] - u_bndry[d]);
-    // }
-    // return;
-
+    // Look up the velocity of the boundary mesh.
     const std::vector<double>& u_current = *var_data[0];
 
-    double x0 = X_bndry(0);
-    double y0 = X_bndry(1);
-    double z0 = X_bndry(2);
+    // =========================================================================
+    // 1. 运动学控制参数
+    // =========================================================================
+    const double f = 1.0;                       // 频率 (Hz)
+    const double omega = 2.0 * M_PI * f;         
+    
+    const double phi_amp = 40.0 * M_PI / 180.0;  // Stroke 拍动角幅值 (40度)
+    const double psi_0   = 90.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (90度)
+    const double psi_amp = 45.0 * M_PI / 180.0;  // Pitch 俯仰角幅值 (45度)
+    
+    const double t_ramp = 0.1;               // 软启动时间常数
+    const double tau = 0.2;                      // 翅膀翻转时间比例
+    const double C_val = 1.0 / (M_PI * tau);     
 
-    // 1. 匀速直线运动 U_Y = -1.0
+    // =========================================================================
+    // 2. 绝对运动学公式计算
+    // =========================================================================
+    // 软启动
+    double S = 1.0 - exp(-t / t_ramp);
+    double S_dot = (1.0 / t_ramp) * exp(-t / t_ramp);
 
-    // double target_x = X_bndry(0) + U_x * current_time;
-    // double target_y = X_bndry(1) + U_y * current_time;
-    // double target_z = X_bndry(2) + U_z * current_time;
+    double sin_wt = sin(omega * t);
+    double cos_wt = cos(omega * t);
+    
+    // Stroke (绕 Z轴)
+    double phi = phi_amp * S * sin_wt;
+    double phi_dot = phi_amp * (S_dot * sin_wt + S * omega * cos_wt);
 
-    // double target_vx = 0.0;
-    // double target_vy = -1.0;
-    // double target_vy = 0.0;
+    // Pitch (绕 X轴)
+    double tanh_C_cos = tanh(C_val * cos_wt);
+    double tanh_C = tanh(C_val);
+    
+    // Pitch 角度 (中心在 90 度，t=0 时为 45 度)
+    double psi = psi_0 - (psi_amp / tanh_C) * tanh_C_cos;
+    
+    // Pitch 速度 (链式法则求导，负负得正)
+    double psi_dot = (psi_amp / tanh_C) * (1.0 - tanh_C_cos * tanh_C_cos) * (C_val * omega * sin_wt);
 
-    // 2. 绕着z轴旋转
-    const double omega = 0.1;
-    double theta = omega * current_time;
+    // =========================================================================
+    // 3. 3D 几何映射与速度传递
+    // =========================================================================
+    double initial_psi = M_PI / 4.0;
+    double x_flat = X_ref(0);
+    double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
+    double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
 
-    double target_x = x0 * cos(theta) - y0 * sin(theta);
-    double target_y = x0 * sin(theta) + y0 * cos(theta);
-    double target_z = z0; // Z 轴坐标在绕 Z 旋转时不发生变化
+    // 第二步：对平躺基准应用当前的绝对 Pitch (psi)
+    double x1 = x_flat;
+    double y1 = y_flat * cos(psi) - z_flat * sin(psi);
+    double z1 = y_flat * sin(psi) + z_flat * cos(psi);
+    
+    double vx1 = 0.0;
+    double vy1 = -z1 * psi_dot; 
+    double vz1 =  y1 * psi_dot; 
 
-    double target_vx = -x0 * omega * sin(theta) - y0 * omega * cos(theta);
-    double target_vy =  x0 * omega * cos(theta) - y0 * omega * sin(theta);
-    double target_vz = 0.0; 
+    // 第三步：应用 Stroke (phi)
+    double target_x = x1 * cos(phi) - y1 * sin(phi);
+    double target_y = x1 * sin(phi) + y1 * cos(phi);
+    double target_z = z1; 
 
-    // 计算 Tether 惩罚力 (拉着网格往目标位置走)
+    double target_vx = vx1 * cos(phi) - target_y * phi_dot;
+    double target_vy = vy1 * cos(phi) + target_x * phi_dot;
+    double target_vz = vz1;
+
+    // =========================================================================
+    // 4. 计算并施加 Penalty 力
+    // =========================================================================
     F(0) = kappa_s * (target_x - x_bndry(0)) + eta_s * (target_vx - u_current[0]);
     F(1) = kappa_s * (target_y - x_bndry(1)) + eta_s * (target_vy - u_current[1]);
     F(2) = kappa_s * (target_z - x_bndry(2)) + eta_s * (target_vz - u_current[2]);
@@ -248,13 +269,22 @@ main(int argc, char* argv[])
         // }
         // solid_mesh.prepare_for_use();
 
-        {
-        const int nx = 16, ny = 16, nz = 16; // 网格分辨率，数值越大网格越密
-        MeshTools::Generation::build_cube(solid_mesh, nx, ny, nz, 
-                                          -1.0, 1.0, 
-                                          -1.0, 1.0, 
-                                          -1.0, 1.0, 
+        MeshTools::Generation::build_cube(solid_mesh, 16, 8, 2, 
+                                          0.0, 1.0,      // X: Spanwise (展向)
+                                          -0.25, 0.25,     // Y: Chordwise (弦向)
+                                          -0.0625, 0.0625,   // Z: Thickness (厚度)
                                           HEX8);
+
+        // Pre-pitch 45 deg
+        const double initial_psi = M_PI / 4.0;
+        for (MeshBase::node_iterator it = solid_mesh.nodes_begin(); it != solid_mesh.nodes_end(); ++it)
+        {
+            Node* n = *it;
+            double y_orig = (*n)(1);
+            double z_orig = (*n)(2);
+            // 绕 X 轴旋转矩阵
+            (*n)(1) = y_orig * cos(initial_psi) - z_orig * sin(initial_psi);
+            (*n)(2) = y_orig * sin(initial_psi) + z_orig * cos(initial_psi);
         }
 
         // 准备使用网格
@@ -346,8 +376,6 @@ main(int argc, char* argv[])
         solid_equation_systems->init();
 
         // Set up the position vector.
-        //
-        // \todo There needs to be an API so that this can be handled by the IBFEMethod class implementation.
         {
             MeshBase& mesh = solid_equation_systems->get_mesh();
             System& X_system = solid_equation_systems->get_system("position");
@@ -484,40 +512,71 @@ main(int argc, char* argv[])
             iteration_num = time_integrator->getIntegratorStep();
             loop_time = time_integrator->getIntegratorTime();
 
-            // Setup the position and velocity vector.
-            //
-            // \todo There needs to be an API so that this can be handled by the IBFEMethod class implementation.
+            // Setup the position and velocity vector. --> update VisIt viz
             {
-                DenseVector<double> U(NDIM);
-                U(1) = -1.0;
                 MeshBase& mesh = solid_equation_systems->get_mesh();
                 System& X_system = solid_equation_systems->get_system("position");
                 const unsigned int X_sys_num = X_system.number();
                 NumericVector<double>& X_coords = *X_system.solution;
-                System& U_system = solid_equation_systems->get_system("velocity");
-                const unsigned int U_sys_num = U_system.number();
-                NumericVector<double>& U_coords = *U_system.solution;
+
+                // System& U_system = solid_equation_systems->get_system("velocity");
+                // const unsigned int U_sys_num = U_system.number();
+                // NumericVector<double>& U_coords = *U_system.solution;
+                
+                const double f = 1.0;
+                const double omega = 2.0 * M_PI * f;
+                const double phi_amp = 40.0 * M_PI / 180.0;
+                const double psi_0   = 90.0 * M_PI / 180.0;
+                const double psi_amp = 45.0 * M_PI / 180.0;
+                const double t_ramp = 2.0 / f;
+                const double tau = 0.2;
+                const double C_val = 1.0 / (M_PI * tau);
+
+                double t = loop_time;
+                double S = 1.0 - exp(-t / t_ramp);
+                double phi = phi_amp * S * sin(omega * t);
+                double tanh_C_cos = tanh(C_val * cos(omega * t));
+                double psi = psi_0 - (psi_amp / tanh(C_val)) * tanh_C_cos;
+
+                double initial_psi = M_PI / 4.0; // 解旋角
+
                 for (MeshBase::node_iterator it = mesh.local_nodes_begin(); it != mesh.local_nodes_end(); ++it)
                 {
                     Node* n = *it;
                     if (n->n_vars(X_sys_num))
                     {
-                        TBOX_ASSERT(n->n_vars(X_sys_num) == NDIM);
-                        const libMesh::Point& X = *n;
-                        for (unsigned int d = 0; d < NDIM; ++d)
-                        {
-                            const int dof_index = n->dof_number(U_sys_num, d, 0);
-                            X_coords.set(dof_index, X(d) + loop_time * U(d));
-                            U_coords.set(dof_index, U(d));
-                        }
+                        const libMesh::Point& X_ref = *n; 
+                        // 解旋
+                        double x_flat = X_ref(0);
+                        double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
+                        double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
+
+                        // 绝对 Pitch
+                        double x1 = x_flat;
+                        double y1 = y_flat * cos(psi) - z_flat * sin(psi);
+                        double z1 = y_flat * sin(psi) + z_flat * cos(psi);
+
+                        // 绝对 Stroke
+                        double target_x = x1 * cos(phi) - y1 * sin(phi);
+                        double target_y = x1 * sin(phi) + y1 * cos(phi);
+                        double target_z = z1;
+
+                        const int dof_x = n->dof_number(X_sys_num, 0, 0);
+                        const int dof_y = n->dof_number(X_sys_num, 1, 0);
+                        const int dof_z = n->dof_number(X_sys_num, 2, 0);
+
+                        X_coords.set(dof_x, target_x);
+                        X_coords.set(dof_y, target_y);
+                        X_coords.set(dof_z, target_z);
                     }
                 }
+
                 X_coords.close();
                 X_system.get_dof_map().enforce_constraints_exactly(X_system, &X_coords);
                 copy_and_synch(X_coords, *X_system.current_local_solution);
-                U_coords.close();
-                U_system.get_dof_map().enforce_constraints_exactly(U_system, &U_coords);
-                copy_and_synch(U_coords, *U_system.current_local_solution);
+                // U_coords.close();
+                // U_system.get_dof_map().enforce_constraints_exactly(U_system, &U_coords);
+                // copy_and_synch(U_coords, *U_system.current_local_solution);
             }
 
             pout << "\n";

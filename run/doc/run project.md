@@ -1,10 +1,13 @@
 # Run IBAMR simulation
 
+\\wsl.localhost\IBAMR_Sim\home\sim\Code\IBAMR_git\run\IBFEex9\build
+
+Displacement (vector) expressions applied to the mesh
+{X_0 - coord(Mesh)[0], X_1 - coord(Mesh)[1], X_2 - coord(Mesh)[2]}
 
 ``` bash
-cd ~/robowing/run5/build
+cd ~/Code/IBAMR_git/run/IBFEex9/build
 rm -rf *
-ln -s ../*.vertex .
 ln -s ../*.cpp .
 ln -s ../input3d .
 cmake \
@@ -214,28 +217,32 @@ ConstraintIBKinematics {
 }
 ```
 
-### Set wing kinematics in `wingKinematics.cpp/.h`
 
+假设 $T$ 为一个完整的扑动周期（$T = 2\pi/\omega$）。
+- $t=0$ (冲程起点)：$\phi=0^\circ, \dot{\phi}=0$；$\psi=45^\circ, \dot{\psi}=0$。此时 $y>0$ 的部分是前缘 (leading edge)，展向与 X 轴重合 ($x>0$)。翅膀准备开始前挥 (Forward stroke/Downstroke)。
+- $t=1/4 T$ (第一次冲程反转)：当 stroke 从 $0^\circ$ 增大到 $40^\circ$ 的过程中，pitch 从 $45^\circ$ 逐渐增大到 $90^\circ$。达到临界点时（$\phi=40^\circ, \psi=90^\circ$），展向与 X 轴夹角为 $40^\circ$。此时翅膀完全垂直于运动方向，弦向 (chord) 严格指向 $-Z$ 向。
+- $t=1/2 T$ (回桨中点)：进入回挥 (Backstroke)，stroke 从 $40^\circ$ 减小回到初始位置 $\phi=0^\circ$。在此过程中，pitch 继续增大，达到最大反向迎角 $\psi=135^\circ$。此时展向重新与 X 轴重合。前缘依然引导气流，但翅膀此时正在向相反方向拍打。
+- $t=3/4 T$ (第二次冲程反转)：stroke 从 $0^\circ$ 继续减小到 $-40^\circ$。pitch 从 $135^\circ$ 逐渐回落到 $90^\circ$。达到临界点时（$\phi=-40^\circ, \psi=90^\circ$），展向与 X 轴夹角为 $-40^\circ$。翅膀再次垂直于运动方向切风，此时弦向 (chord) 严格指向 $+Z$ 向，准备进行下一次翻转。
+- $t=T$ (周期结束)：stroke 从 $-40^\circ$ 回到 $0^\circ$，pitch 从 $90^\circ$ 减小回到 $45^\circ$。翅膀完全回到 $t=0$ 时的初始位姿和速度，完成一个完美的“8”字型运动周期。
+
+**参数定义：**
+$$S(t) = 1 - e^{-t / t_{ramp}}$$
+$$\dot{S}(t) = \frac{1}{t_{ramp}} e^{-t / t_{ramp}}$$
+$$C = \frac{1}{\pi \tau}$$
+* $\phi_{amp} = 40^\circ$ （拍打振幅）
+* $\psi_0 = 90^\circ$ （俯仰中心角/垂直切风角）
+* $\psi_{amp} = 45^\circ$ （俯仰振幅）
+
+#### 拍动角 (Stroke, 绕 Z 轴)
 $$\phi(t) = \phi_{amp} \cdot S(t) \cdot \sin(\omega t)$$
-
 $$\dot{\phi}(t) = \phi_{amp} \left[ \dot{S}(t) \sin(\omega t) + S(t) \omega \cos(\omega t) \right]$$
 
-- 软启动$S(t) = 1 - e^{-t / t_{ramp}},\dot{S}(t) = \frac{1}{t_{ramp}} e^{-t / t_{ramp}}$
+#### 俯仰角 (Pitch, 绕展向 X 轴)
+$t=0, \cos(0)=1$ 时，$\psi = 90^\circ - 45^\circ = 45^\circ$；当 $t=T/2, \cos(\pi)=-1$ 时，$\psi = 90^\circ - (-45^\circ) = 135^\circ$。
+$$\psi(t) = \psi_0 - \frac{\psi_{amp}}{\tanh(C)} \tanh(C \cos(\omega t))$$
 
-$$\psi(t) = \frac{\psi_{amp}}{\tanh(C)} \tanh(C \cos(\omega t))$$
+$$\dot{\psi}(t) = \frac{\psi_{amp}}{\tanh(C)} \left[ 1 - \tanh^2(C \cos(\omega t)) \right] \left( C \omega \sin(\omega t) \right)$$
 
-$$\dot{\psi}(t) = \frac{\psi_{amp}}{\tanh(C)} \left[ 1 - \tanh^2(C \cos(\omega t)) \right] \left( -C \omega \sin(\omega t) \right)$$
-
-- $C = \frac{1}{\pi \tau}$，$\tau$代表翅膀翻转时间比例
-
-**软启动：**
-
-$t=0$时，$\phi=\dot \phi=0$，$\psi=45,\dot\psi=0$。
-
-### Set wing initial mesh in `wing.vertex`
-
-1. 展向沿 X 轴，弦向沿 Z 轴；Stroke 绕竖直 Z 轴旋转，Pitch 扭转绕展向 X 轴旋转 。
-2. 坐标系中心为$[0.5,0.5,0.5]，$初始格点`wing_flat`生成在$X-Z$平面($Y=0.5$)，长边(LE,span)在$X=Z=0.5$轴上，翅膀挥动时一直$X>0.5$。
 
 ```bash
 # first generate wing_flat.vertex
