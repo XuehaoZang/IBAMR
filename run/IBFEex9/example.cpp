@@ -275,6 +275,8 @@ main(int argc, char* argv[])
                                           -0.0625, 0.0625,   // Z: Thickness (厚度)
                                           HEX8);
 
+        // solid_mesh.read("wingSolid.msh");
+
         // Pre-pitch 45 deg
         const double initial_psi = M_PI / 4.0;
         for (MeshBase::node_iterator it = solid_mesh.nodes_begin(); it != solid_mesh.nodes_end(); ++it)
@@ -528,7 +530,7 @@ main(int argc, char* argv[])
                 const double phi_amp = 40.0 * M_PI / 180.0;
                 const double psi_0   = 90.0 * M_PI / 180.0;
                 const double psi_amp = 45.0 * M_PI / 180.0;
-                const double t_ramp = 2.0 / f;
+                const double t_ramp = 0.1;
                 const double tau = 0.2;
                 const double C_val = 1.0 / (M_PI * tau);
 

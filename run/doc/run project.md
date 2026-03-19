@@ -20,6 +20,24 @@ make -j14
 ~/Applications/petsc-3.23.3/bin/mpirun -n 4 ./main3d ../input3d
 ```
 
+
+``` bash
+cd ~/Code/IBAMR_git/run/IBFEex9/build
+rm -rf *
+ln -s ../*.cpp .
+ln -s ../input3d .
+ln -s ../wingSolid .
+mv wingSolid wingSolid.msh
+cmake \
+  -DIBAMR_ROOT=$HOME/Applications/ibamr-0.18.0-opt \
+  -DCMAKE_CXX_COMPILER=$HOME/Applications/petsc-3.23.3/bin/mpicxx \
+  ../
+  
+make -j14
+
+~/Applications/petsc-3.23.3/bin/mpirun -n 4 ./main3d ../input3d
+```
+
 ## Modify with eel3D
 
 ConstraintIB/eel3D (a 3D eel swimming in fluid)
@@ -35,7 +53,7 @@ ConstraintIB/eel3D (a 3D eel swimming in fluid)
 
 ### Define computational domain
 
-Domain is defined as a cubic $[0, L]^3$, $L= 1$
+Domain is defined as a cubic $[-L, L]^3$, $L= ?$
 
 - Geometry in microns
 

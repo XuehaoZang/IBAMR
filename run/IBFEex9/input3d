@@ -5,7 +5,7 @@ RHO = 1.0
 
 // grid spacing parameters
 L = 8.0                                       // width of computational domain
-MAX_LEVELS = 2                                 // maximum number of levels in locally refined grid
+MAX_LEVELS = 4                                 // maximum number of levels in locally refined grid
 REF_RATIO  = 2                                 // refinement ratio between levels
 N = 16                                         // actual    number of grid cells on coarsest grid level
 NFINEST = (REF_RATIO^(MAX_LEVELS - 1))*N       // effective number of grid cells on finest   grid level
