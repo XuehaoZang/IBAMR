@@ -88,7 +88,7 @@ tether_force_function(VectorValue<double>& F,
     const double psi_amp = 45.0 * M_PI / 180.0;  // Pitch 俯仰角幅值 (45度)
     
     const double t_ramp = 0.1;               // 软启动时间常数
-    const double tau = 0.2;                      // 翅膀翻转时间比例
+    const double tau = 0.1;                      // 翅膀翻转时间比例
     const double C_val = 1.0 / (M_PI * tau);     
 
     // =========================================================================
@@ -269,12 +269,21 @@ main(int argc, char* argv[])
         // }
         // solid_mesh.prepare_for_use();
 
-        MeshTools::Generation::build_cube(solid_mesh, 16, 8, 2, 
-                                          0.0, 1.0,      // X: Spanwise (展向)
-                                          -0.25, 0.25,     // Y: Chordwise (弦向)
-                                          -0.0625, 0.0625,   // Z: Thickness (厚度)
-                                          HEX8);
+        // MeshTools::Generation::build_cube(solid_mesh, 16, 8, 2, 
+        //                                   0.0, 1.0,      // X: Spanwise (展向)
+        //                                   -0.25, 0.25,     // Y: Chordwise (弦向)
+        //                                   -0.0625, 0.0625,   // Z: Thickness (厚度)
+        //                                   HEX8);
 
+        // 按照真实果蝇机翼比例 (250:75:7) 生成代理模型
+        // 展长 1.0, 弦长 0.3, 厚度 0.028
+        // 固体网格间距 ds 严格控制在 ~0.03 左右，完美匹配 0.0625 的流体网格
+        MeshTools::Generation::build_cube(solid_mesh, 
+                                          32, 10, 1,             // 切分数量：X(32段), Y(10段), Z(1段-上下两层皮)
+                                          0.0, 1.0,              // X: Spanwise (展向)
+                                          -0.15, 0.15,           // Y: Chordwise (弦向)
+                                          -0.014, 0.014,         // Z: Thickness (厚度)
+                                          HEX8);
         // solid_mesh.read("wingSolid.msh");
 
         // Pre-pitch 45 deg
@@ -506,6 +515,16 @@ main(int argc, char* argv[])
             }
         }
 
+        // ==============================================================
+        // 创建用于记录受力的 CSV 文件 (包含 Manual 和 System 对比)
+        // ==============================================================
+        std::ofstream force_file;
+        if (SAMRAI_MPI::getRank() == 0) {
+            force_file.open("aero_forces_compare.csv");
+            // 写入表头: 手动积分的力 (man) 和 系统提取的力 (sys)
+            force_file << "Time,Fx_man,Fy_man,Fz_man,Fx_sys,Fy_sys,Fz_sys\n"; 
+        }
+        
         // Main time step loop.
         double loop_time_end = time_integrator->getEndTime();
         double dt = 0.0;
@@ -531,7 +550,7 @@ main(int argc, char* argv[])
                 const double psi_0   = 90.0 * M_PI / 180.0;
                 const double psi_amp = 45.0 * M_PI / 180.0;
                 const double t_ramp = 0.1;
-                const double tau = 0.2;
+                const double tau = 0.1;
                 const double C_val = 1.0 / (M_PI * tau);
 
                 double t = loop_time;
@@ -579,6 +598,112 @@ main(int argc, char* argv[])
                 // U_coords.close();
                 // U_system.get_dof_map().enforce_constraints_exactly(U_system, &U_coords);
                 // copy_and_synch(U_coords, *U_system.current_local_solution);
+            }
+
+            // ==============================================================
+            // 双通道计算/提取机翼受到的真实空气动力 (升力与阻力)
+            // ==============================================================
+            {
+                MeshBase& mesh = solid_equation_systems->get_mesh();
+                
+                // 1. 获取物理位移系统
+                System& coord_system = bndry_equation_systems->get_system("IB coordinates system");
+                NumericVector<double>& actual_coords = *coord_system.current_local_solution;
+                const unsigned int coord_sys_num = coord_system.number();
+
+                // 2. 获取物理受力系统 (这是你刚才用探针查出来的宝藏！)
+                System& force_system = bndry_equation_systems->get_system("IB force system");
+                NumericVector<double>& actual_forces = *force_system.current_local_solution;
+                const unsigned int force_sys_num = force_system.number();
+
+                // 运动学参数 (保持与 tether 里面一致)
+                const double f = 1.0;
+                const double omega = 2.0 * M_PI * f;
+                const double phi_amp = 40.0 * M_PI / 180.0;
+                const double psi_0   = 90.0 * M_PI / 180.0;
+                const double psi_amp = 45.0 * M_PI / 180.0;
+                const double t_ramp = 0.1;
+                const double tau = 0.1;
+                const double C_val = 1.0 / (M_PI * tau);
+                const double initial_psi = M_PI / 4.0; 
+                
+                const double KAPPA_S = 1.0e6; // 仅用于 Manual 计算核对
+
+                double t = loop_time;
+                double S = 1.0 - exp(-t / t_ramp);
+                double phi = phi_amp * S * sin(omega * t);
+                double tanh_C_cos = tanh(C_val * cos(omega * t));
+                double psi = psi_0 - (psi_amp / tanh(C_val)) * tanh_C_cos;
+
+                // 两个通道的受力累加器
+                double local_Fx_man = 0.0, local_Fy_man = 0.0, local_Fz_man = 0.0;
+                double local_Fx_sys = 0.0, local_Fy_sys = 0.0, local_Fz_sys = 0.0;
+
+                for (MeshBase::node_iterator it = mesh.local_nodes_begin(); it != mesh.local_nodes_end(); ++it)
+                {
+                    Node* n = *it;
+                    // 确保节点同时在这两个系统里有注册
+                    if (n->n_vars(coord_sys_num) && n->n_vars(force_sys_num))
+                    {
+                        // ----- 通道 A: 手动算位移差 (Manual) -----
+                        const libMesh::Point& X_ref = *n; 
+                        double x_flat = X_ref(0);
+                        double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
+                        double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
+
+                        double x1 = x_flat;
+                        double y1 = y_flat * cos(psi) - z_flat * sin(psi);
+                        double z1 = y_flat * sin(psi) + z_flat * cos(psi);
+                        
+                        double target_x = x1 * cos(phi) - y1 * sin(phi);
+                        double target_y = x1 * sin(phi) + y1 * cos(phi);
+                        double target_z = z1;
+
+                        const int dof_cx = n->dof_number(coord_sys_num, 0, 0);
+                        const int dof_cy = n->dof_number(coord_sys_num, 1, 0);
+                        const int dof_cz = n->dof_number(coord_sys_num, 2, 0);
+                        double actual_x = actual_coords(dof_cx);
+                        double actual_y = actual_coords(dof_cy);
+                        double actual_z = actual_coords(dof_cz);
+
+                        local_Fx_man += -KAPPA_S * (target_x - actual_x);
+                        local_Fy_man += -KAPPA_S * (target_y - actual_y);
+                        local_Fz_man += -KAPPA_S * (target_z - actual_z);
+
+                        // ----- 通道 B: 直接读取底层体力密度 (System) -----
+                        const int dof_fx = n->dof_number(force_sys_num, 0, 0);
+                        const int dof_fy = n->dof_number(force_sys_num, 1, 0);
+                        const int dof_fz = n->dof_number(force_sys_num, 2, 0);
+                        
+                        // IBAMR 内部存储的是“固体施加给流体的力”。
+                        // 根据牛顿第三定律，机翼受到的气动力是它的相反数，所以加负号。
+                        local_Fx_sys += -actual_forces(dof_fx);
+                        local_Fy_sys += -actual_forces(dof_fy);
+                        local_Fz_sys += -actual_forces(dof_fz);
+                    }
+                }
+
+                // 乘以节点控制体积 (黎曼和求积分)
+                // Span(1.0) * Chord(0.3) * Thickness(0.028)
+                double V_total = 1.0 * 0.3 * 0.028; 
+                double total_nodes = mesh.n_nodes(); 
+                double dV = V_total / total_nodes;
+
+                local_Fx_man *= dV; local_Fy_man *= dV; local_Fz_man *= dV;
+                local_Fx_sys *= dV; local_Fy_sys *= dV; local_Fz_sys *= dV;
+
+                // MPI 并行规约合并 (6 个变量一起合并)
+                double global_F[6] = {local_Fx_man, local_Fy_man, local_Fz_man, 
+                                      local_Fx_sys, local_Fy_sys, local_Fz_sys};
+                SAMRAI_MPI::sumReduction(global_F, 6);
+
+                // 写入 CSV
+                if (SAMRAI_MPI::getRank() == 0) {
+                    force_file << loop_time << "," 
+                               << global_F[0] << "," << global_F[1] << "," << global_F[2] << ","
+                               << global_F[3] << "," << global_F[4] << "," << global_F[5] << "\n";
+                    force_file.flush(); 
+                }
             }
 
             pout << "\n";
