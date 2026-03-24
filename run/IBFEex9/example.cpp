@@ -87,7 +87,7 @@ tether_force_function(VectorValue<double>& F,
     const double psi_0   = 90.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (90度)
     const double psi_amp = 45.0 * M_PI / 180.0;  // Pitch 俯仰角幅值 (45度)
     
-    const double t_ramp = 0.1;               // 软启动时间常数
+    const double t_ramp = 0.02;               // 软启动时间常数
     const double tau = 0.1;                      // 翅膀翻转时间比例
     const double C_val = 1.0 / (M_PI * tau);     
 
@@ -275,16 +275,47 @@ main(int argc, char* argv[])
         //                                   -0.0625, 0.0625,   // Z: Thickness (厚度)
         //                                   HEX8);
 
-        // 按照真实果蝇机翼比例 (250:75:7) 生成代理模型
+        // 按照真实果蝇机翼比例 (250:75:7) 生成长方体的代理模型
         // 展长 1.0, 弦长 0.3, 厚度 0.028
         // 固体网格间距 ds 严格控制在 ~0.03 左右，完美匹配 0.0625 的流体网格
-        MeshTools::Generation::build_cube(solid_mesh, 
-                                          32, 10, 1,             // 切分数量：X(32段), Y(10段), Z(1段-上下两层皮)
-                                          0.0, 1.0,              // X: Spanwise (展向)
-                                          -0.15, 0.15,           // Y: Chordwise (弦向)
-                                          -0.014, 0.014,         // Z: Thickness (厚度)
-                                          HEX8);
-        // solid_mesh.read("wingSolid.msh");
+        // MeshTools::Generation::build_cube(solid_mesh, 
+        //                                   32, 10, 1,             // 切分数量：X(32段), Y(10段), Z(1段-上下两层皮)
+        //                                   0.0, 1.0,              // X: Spanwise (展向)
+        //                                   -0.15, 0.15,           // Y: Chordwise (弦向)
+        //                                   -0.014, 0.014,         // Z: Thickness (厚度)
+        //                                   HEX8);
+        
+        solid_mesh.read("wing_custom.msh");
+
+        double min_x = 1e10, max_x = -1e10;
+        double min_y = 1e10, max_y = -1e10;
+        double min_z = 1e10, max_z = -1e10;
+
+        for (MeshBase::node_iterator it = solid_mesh.nodes_begin(); it != solid_mesh.nodes_end(); ++it) {
+            Node* n = *it;
+            min_x = std::min(min_x, (*n)(0)); max_x = std::max(max_x, (*n)(0));
+            min_y = std::min(min_y, (*n)(1)); max_y = std::max(max_y, (*n)(1));
+            min_z = std::min(min_z, (*n)(2)); max_z = std::max(max_z, (*n)(2));
+        }
+
+        //  统一等比缩放 (Uniform Scaling) 与 几何精确对齐
+        // 以最长的展向边 (X方向) 为基准，计算唯一的全局缩放系数
+        double span_length = max_x - min_x;
+        double global_scale = 1.0 / span_length; 
+
+        for (MeshBase::node_iterator it = solid_mesh.nodes_begin(); it != solid_mesh.nodes_end(); ++it) {
+            Node* n = *it;
+            
+            // X 轴 (展向)：翼根平移到 X=0 (以原点为轴进行 Stroke 拍打)
+            (*n)(0) = ((*n)(0) - min_x) * global_scale;
+            
+            // Y 轴 (弦向)：将前缘 (LE, 即最高点 max_y) 严格对齐到 Y=0 的旋转轴
+            // 机翼的主体会自然向负 Y 区域延伸
+            (*n)(1) = ((*n)(1) - max_y) * global_scale;
+            
+            // Z 轴 (厚度)：厚度几何中心对齐到 Z=0
+            (*n)(2) = ((*n)(2) - (min_z + max_z) / 2.0) * global_scale;
+        }
 
         // Pre-pitch 45 deg
         const double initial_psi = M_PI / 4.0;
@@ -549,7 +580,7 @@ main(int argc, char* argv[])
                 const double phi_amp = 40.0 * M_PI / 180.0;
                 const double psi_0   = 90.0 * M_PI / 180.0;
                 const double psi_amp = 45.0 * M_PI / 180.0;
-                const double t_ramp = 0.1;
+                const double t_ramp = 0.02;
                 const double tau = 0.1;
                 const double C_val = 1.0 / (M_PI * tau);
 
@@ -622,7 +653,7 @@ main(int argc, char* argv[])
                 const double phi_amp = 40.0 * M_PI / 180.0;
                 const double psi_0   = 90.0 * M_PI / 180.0;
                 const double psi_amp = 45.0 * M_PI / 180.0;
-                const double t_ramp = 0.1;
+                const double t_ramp = 0.02;
                 const double tau = 0.1;
                 const double C_val = 1.0 / (M_PI * tau);
                 const double initial_psi = M_PI / 4.0; 
