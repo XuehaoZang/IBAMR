@@ -1,26 +1,5 @@
 # Run IBAMR simulation
 
-\\wsl.localhost\IBAMR_Sim\home\sim\Code\IBAMR_git\run\IBFEex9\build
-
-Displacement (vector) expressions applied to the mesh
-{X_0 - coord(Mesh)[0], X_1 - coord(Mesh)[1], X_2 - coord(Mesh)[2]}
-
-``` bash
-cd ~/Code/IBAMR_git/run/IBFEex9/build
-rm -rf *
-ln -s ../*.cpp .
-ln -s ../input3d .
-cmake \
-  -DIBAMR_ROOT=$HOME/Applications/ibamr-0.18.0-opt \
-  -DCMAKE_CXX_COMPILER=$HOME/Applications/petsc-3.23.3/bin/mpicxx \
-  ../
-  
-make -j14
-
-~/Applications/petsc-3.23.3/bin/mpirun -n 12 ./main3d ../input3d
-```
-
-
 ``` bash
 cd ~/Code/IBAMR_git/run/IBFEex9/build
 rm -rf *
@@ -34,59 +13,20 @@ cmake \
   
 make -j14
 
-~/Applications/petsc-3.23.3/bin/mpirun -n 12 ./main3d ../input3d
+~/Applications/petsc-3.23.3/bin/mpirun -n 8 ./main3d ../input3d
 ```
 
-Total number of systems: 4
---------------------------------------------------
-System Index : 0
-System Name  : [IB coordinates system]
-System Type  : Explicit
-Num Variables: 3
-  -> Var 0 : X_0
-  -> Var 1 : X_1
-  -> Var 2 : X_2
---------------------------------------------------
-System Index : 1
-System Name  : [IB coordinate mapping system]
-System Type  : Explicit
-Num Variables: 3
-  -> Var 0 : dX_0
-  -> Var 1 : dX_1
-  -> Var 2 : dX_2
---------------------------------------------------
-System Index : 2
-System Name  : [IB velocity system]
-System Type  : Explicit
-Num Variables: 3
-  -> Var 0 : U_0
-  -> Var 1 : U_1
-  -> Var 2 : U_2
---------------------------------------------------
-System Index : 3
-System Name  : [IB force system]
-System Type  : Explicit
-Num Variables: 3
-  -> Var 0 : F_0
-  -> Var 1 : F_1
-  -> Var 2 : F_2
-
-## Modify with eel3D
-
-ConstraintIB/eel3D (a 3D eel swimming in fluid)
+## Modify with IBFE ex9
 
 ----
 
-- `robowing.cpp`
-- `wingKinematics.h`
-- `wingKinematics.cpp`
-- `wing.vertex`
+- `example.cpp`
 - `input3d`
+- `wing_custom.msh`
 - `CMakeLists.txt`
 
 ### Define computational domain
-use the U_tip mean instead of u tip max
-Domain is defined as a cubic $[-L, L]^3$, $L= 4$
+Domain is defined as a cubic $[-0.5L, 0.5L]^3$, $L= 8$
 
 - Geometry in microns
 
@@ -143,6 +83,7 @@ $$
 \mu_{sim} = \frac{\rho_{sim} \cdot U_{tip,mean,sim} \cdot \bar{c}_{sim}}{Re} = \frac{1.0 \cdot 2.7924 \cdot 0.3}{1.3} = \frac{0.83772}{1.3} \approx \mathbf{0.6444}
 $$
 
+根据不可压缩 Navier-Stokes 方程，力的量纲是 $[M L T^{-2}]$，可以等价转换为 $[\rho L^4 T^{-2}]$。由于在仿真中，密度 $\rho_{sim} = 1.0$，特征长度 $L_{sim} = 1.0$，周期 $T_{sim} = 1.0$，我们可以得出物理真实力 $F_{real}$ 与仿真力 $F_{sim}$ 的转换关系：$$F_{real} = F_{sim} \times \left( \rho_{real} \cdot \frac{L_{real}^4}{T_{real}^2} \right)$$代入你的实际物理参数（假设空气密度）：空气密度 ($\rho_{real}$): $1.225 \text{ kg/m}^3$参考长度 ($L_{real}$): $250 \ \mu m = 2.5 \times 10^{-4} \text{ m}$参考时间 ($T_{real}$): $1.0 / 530 \text{ s} \approx 1.8868 \times 10^{-3} \text{ s}$$$F_{scale} = 1.225 \times \frac{(2.5 \times 10^{-4})^4}{(1/530)^2} = 1.225 \times \frac{3.906 \times 10^{-15}}{3.56 \times 10^{-6}} \approx \mathbf{1.344 \times 10^{-9} \text{ N} = 1.344 \text{ nN}}$$结论：你的仿真每输出 1.0 的力，对应真实物理世界中 1.344 纳牛顿 (nN) 的力！
 
 ```text
 // physical parameters
@@ -153,7 +94,6 @@ MU = 0.6444       // 对应 R=1.0, c=0.3 的绝对无量纲参数
 // grid spacing parameters
 L = 4.0           // 计算域半宽 [-4, 4]
 ```
-
 
 假设 $T$ 为一个完整的扑动周期（$T = 2\pi/\omega$）。
 - $t=0$ (冲程起点)：$\phi=0^\circ, \dot{\phi}=0$；$\psi=45^\circ, \dot{\psi}=0$。此时 $y>0$ 的部分是前缘 (leading edge)，展向与 X 轴重合 ($x>0$)。翅膀准备开始前挥 (Forward stroke/Downstroke)。
@@ -181,3 +121,6 @@ $$\psi(t) = \psi_0 - \frac{\psi_{amp}}{\tanh(C)} \tanh(C \cos(\omega t))$$
 $$\dot{\psi}(t) = \frac{\psi_{amp}}{\tanh(C)} \left[ 1 - \tanh^2(C \cos(\omega t)) \right] \left( C \omega \sin(\omega t) \right)$$
 
 
+Visit:
+Displacement (vector) expressions applied to the mesh
+Control - Add expression - `{X_0 - coord(Mesh)[0], X_1 - coord(Mesh)[1], X_2 - coord(Mesh)[2]}` - Add Displace operator

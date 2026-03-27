@@ -84,10 +84,9 @@ tether_force_function(VectorValue<double>& F,
     const double omega = 2.0 * M_PI * f;         
     
     const double phi_amp = 40.0 * M_PI / 180.0;  // Stroke 拍动角幅值 (40度)
-    const double psi_0   = 90.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (90度)
     const double psi_amp = 45.0 * M_PI / 180.0;  // Pitch 俯仰角幅值 (45度)
     
-    const double t_ramp = 0.02;               // 软启动时间常数
+    const double t_ramp = 0.2;               // 软启动时间常数
     const double tau = 0.1;                      // 翅膀翻转时间比例
     const double C_val = 1.0 / (M_PI * tau);     
 
@@ -100,28 +99,60 @@ tether_force_function(VectorValue<double>& F,
 
     double sin_wt = sin(omega * t);
     double cos_wt = cos(omega * t);
-    
-    // Stroke (绕 Z轴)
-    double phi = phi_amp * S * sin_wt;
-    double phi_dot = phi_amp * (S_dot * sin_wt + S * omega * cos_wt);
 
-    // Pitch (绕 X轴)
     double tanh_C_cos = tanh(C_val * cos_wt);
+    double tanh_C_sin = tanh(C_val * sin_wt);
     double tanh_C = tanh(C_val);
     
-    // Pitch 角度 (中心在 90 度，t=0 时为 45 度)
-    double psi = psi_0 - (psi_amp / tanh_C) * tanh_C_cos;
+    // ============================Rowing rotating==============================
+    // // Stroke (绕 Z轴)
+    double phi = 2.0 * M_PI * t;
+    double phi_dot = 2.0 * M_PI;
+
+    const double psi_0   = 60.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (90度)
+    double psi = psi_0;
+    double psi_dot = 0.0;
     
-    // Pitch 速度 (链式法则求导，负负得正)
-    double psi_dot = (psi_amp / tanh_C) * (1.0 - tanh_C_cos * tanh_C_cos) * (C_val * omega * sin_wt);
+    // ============================Drosophila lift-based==============================
+    // // Stroke (绕 Z轴)
+    // double phi = phi_amp * S * sin_wt;
+    // double phi_dot = phi_amp * (S_dot * sin_wt + S * omega * cos_wt);
+
+    // // Pitch (绕 X轴中心在 90 度，t=0 时为 45 度)
+    // const double psi_0   = 90.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (90度)
+    // double psi = psi_0 - (psi_amp / tanh_C) * tanh_C_cos;
+    
+    // // // Pitch 速度 (链式法则求导，负负得正)
+    // double psi_dot = (psi_amp / tanh_C) * (1.0 - tanh_C_cos * tanh_C_cos) * (C_val * omega * sin_wt);
+
+    // ============================drag-based扑打==============================
+    // // Stroke (绕 Z轴) - 使用 SIN (从 0 开始)
+    // double phi = phi_amp * sin_wt;
+    // // Stroke 速度 - SIN 求导变 COS (符号为正)
+    // double phi_dot = phi_amp * omega * cos_wt;
+
+    // // Pitch (绕 X轴) - 内部使用 COS，确保在最大速度时 (t=0) 垂直挡水
+    
+    // const double psi_0   = 45.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (45度)
+    
+    // // Pitch 角度 
+    // // t=0 时，cos=1，psi = 45 + 45 = 90度 (垂直划水，阻力最大)
+    // // t=T/2 时，cos=-1，psi = 45 - 45 = 0度 (水平返回，阻力最小)
+    // double psi = psi_0 + (psi_amp / tanh_C) * tanh_C_cos;
+    
+    // // Pitch 速度 (链式法则: tanh求导 * 内部 cos 求导产生 -sin，必须加负号！)
+    // double psi_dot = -(psi_amp / tanh_C) * (1.0 - tanh_C_cos * tanh_C_cos) * (C_val * omega * sin_wt);
 
     // =========================================================================
     // 3. 3D 几何映射与速度传递
     // =========================================================================
-    double initial_psi = M_PI / 4.0;
+    // double initial_psi = M_PI / 4.0;
+    // double x_flat = X_ref(0);
+    // double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
+    // double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
     double x_flat = X_ref(0);
-    double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
-    double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
+    double y_flat = X_ref(1);
+    double z_flat = X_ref(2);
 
     // 第二步：对平躺基准应用当前的绝对 Pitch (psi)
     double x1 = x_flat;
@@ -137,10 +168,13 @@ tether_force_function(VectorValue<double>& F,
     double target_y = x1 * sin(phi) + y1 * cos(phi);
     double target_z = z1; 
 
-    double target_vx = vx1 * cos(phi) - target_y * phi_dot;
-    double target_vy = vy1 * cos(phi) + target_x * phi_dot;
-    double target_vz = vz1;
+    // double target_vx = vx1 * cos(phi) - target_y * phi_dot;
+    // double target_vy = vy1 * cos(phi) + target_x * phi_dot;
+    // double target_vz = vz1;
 
+    double target_vx = (vx1 * cos(phi) - vy1 * sin(phi)) - target_y * phi_dot;
+    double target_vy = (vx1 * sin(phi) + vy1 * cos(phi)) + target_x * phi_dot;
+    double target_vz = vz1;
     // =========================================================================
     // 4. 计算并施加 Penalty 力
     // =========================================================================
@@ -317,17 +351,17 @@ main(int argc, char* argv[])
             (*n)(2) = ((*n)(2) - (min_z + max_z) / 2.0) * global_scale;
         }
 
-        // Pre-pitch 45 deg
-        const double initial_psi = M_PI / 4.0;
-        for (MeshBase::node_iterator it = solid_mesh.nodes_begin(); it != solid_mesh.nodes_end(); ++it)
-        {
-            Node* n = *it;
-            double y_orig = (*n)(1);
-            double z_orig = (*n)(2);
-            // 绕 X 轴旋转矩阵
-            (*n)(1) = y_orig * cos(initial_psi) - z_orig * sin(initial_psi);
-            (*n)(2) = y_orig * sin(initial_psi) + z_orig * cos(initial_psi);
-        }
+        // // Pre-pitch 45 deg
+        // const double initial_psi = M_PI / 2.0;
+        // for (MeshBase::node_iterator it = solid_mesh.nodes_begin(); it != solid_mesh.nodes_end(); ++it)
+        // {
+        //     Node* n = *it;
+        //     double y_orig = (*n)(1);
+        //     double z_orig = (*n)(2);
+        //     // 绕 X 轴旋转矩阵
+        //     (*n)(1) = y_orig * cos(initial_psi) - z_orig * sin(initial_psi);
+        //     (*n)(2) = y_orig * sin(initial_psi) + z_orig * cos(initial_psi);
+        // }
 
         // 准备使用网格
         solid_mesh.prepare_for_use();
@@ -547,13 +581,12 @@ main(int argc, char* argv[])
         }
 
         // ==============================================================
-        // 创建用于记录受力的 CSV 文件 (包含 Manual 和 System 对比)
+        // 创建用于记录受力的 CSV 文件s
         // ==============================================================
         std::ofstream force_file;
         if (SAMRAI_MPI::getRank() == 0) {
             force_file.open("aero_forces_compare.csv");
-            // 写入表头: 手动积分的力 (man) 和 系统提取的力 (sys)
-            force_file << "Time,Fx_man,Fy_man,Fz_man,Fx_sys,Fy_sys,Fz_sys\n"; 
+            force_file << "Time,Fx,Fy,Fz\n";
         }
         
         // Main time step loop.
@@ -578,19 +611,68 @@ main(int argc, char* argv[])
                 const double f = 1.0;
                 const double omega = 2.0 * M_PI * f;
                 const double phi_amp = 40.0 * M_PI / 180.0;
-                const double psi_0   = 90.0 * M_PI / 180.0;
                 const double psi_amp = 45.0 * M_PI / 180.0;
-                const double t_ramp = 0.02;
+                const double t_ramp = 0.2;
                 const double tau = 0.1;
                 const double C_val = 1.0 / (M_PI * tau);
 
                 double t = loop_time;
+                
+                // =========================================================================
+                // 运动学公式计算
+                // =========================================================================
+                // 软启动
                 double S = 1.0 - exp(-t / t_ramp);
-                double phi = phi_amp * S * sin(omega * t);
-                double tanh_C_cos = tanh(C_val * cos(omega * t));
-                double psi = psi_0 - (psi_amp / tanh(C_val)) * tanh_C_cos;
+                double S_dot = (1.0 / t_ramp) * exp(-t / t_ramp);
 
-                double initial_psi = M_PI / 4.0; // 解旋角
+                double sin_wt = sin(omega * t);
+                double cos_wt = cos(omega * t);
+
+                double tanh_C_cos = tanh(C_val * cos_wt);
+                double tanh_C_sin = tanh(C_val * sin_wt);
+                double tanh_C = tanh(C_val);
+                
+                // ============================Rowing rotating==============================
+                // // Stroke (绕 Z轴)
+                double phi = 2.0 * M_PI * t;
+                double phi_dot = 2.0 * M_PI;
+
+                const double psi_0   = 60.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (90度)
+                double psi = psi_0;
+                double psi_dot = 0.0;
+                
+                // ============================Drosophila lift-based==============================
+                // // Stroke (绕 Z轴)
+                // double phi = phi_amp * S * sin_wt;
+                // double phi_dot = phi_amp * (S_dot * sin_wt + S * omega * cos_wt);
+
+                // // Pitch (绕 X轴中心在 90 度，t=0 时为 45 度)
+                // const double psi_0   = 90.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (90度)
+                // double psi = psi_0 - (psi_amp / tanh_C) * tanh_C_cos;
+                
+                // // // Pitch 速度 (链式法则求导，负负得正)
+                // double psi_dot = (psi_amp / tanh_C) * (1.0 - tanh_C_cos * tanh_C_cos) * (C_val * omega * sin_wt);
+
+                // ============================drag-based扑打==============================
+                // // Stroke (绕 Z轴) - 使用 SIN (从 0 开始)
+                // double phi = phi_amp * sin_wt;
+                // // Stroke 速度 - SIN 求导变 COS (符号为正)
+                // double phi_dot = phi_amp * omega * cos_wt;
+
+                // // Pitch (绕 X轴) - 内部使用 COS，确保在最大速度时 (t=0) 垂直挡水
+                
+                // const double psi_0   = 45.0 * M_PI / 180.0;  // Pitch 俯仰中心角 (45度)
+                
+                // // Pitch 角度 
+                // // t=0 时，cos=1，psi = 45 + 45 = 90度 (垂直划水，阻力最大)
+                // // t=T/2 时，cos=-1，psi = 45 - 45 = 0度 (水平返回，阻力最小)
+                // double psi = psi_0 + (psi_amp / tanh_C) * tanh_C_cos;
+                
+                // // Pitch 速度 (链式法则: tanh求导 * 内部 cos 求导产生 -sin，必须加负号！)
+                // double psi_dot = -(psi_amp / tanh_C) * (1.0 - tanh_C_cos * tanh_C_cos) * (C_val * omega * sin_wt);
+
+
+                // double initial_psi = M_PI / 4.0; // 解旋角
 
                 for (MeshBase::node_iterator it = mesh.local_nodes_begin(); it != mesh.local_nodes_end(); ++it)
                 {
@@ -598,10 +680,14 @@ main(int argc, char* argv[])
                     if (n->n_vars(X_sys_num))
                     {
                         const libMesh::Point& X_ref = *n; 
-                        // 解旋
+                        // // 解旋
+                        // double x_flat = X_ref(0);
+                        // double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
+                        // double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
+
                         double x_flat = X_ref(0);
-                        double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
-                        double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
+                        double y_flat = X_ref(1);
+                        double z_flat = X_ref(2);
 
                         // 绝对 Pitch
                         double x1 = x_flat;
@@ -632,107 +718,51 @@ main(int argc, char* argv[])
             }
 
             // ==============================================================
-            // 双通道计算/提取机翼受到的真实空气动力 (升力与阻力)
+            // 提取机翼受到的真实空气动力 (System Force Integration)
             // ==============================================================
             {
                 MeshBase& mesh = solid_equation_systems->get_mesh();
                 
-                // 1. 获取物理位移系统
-                System& coord_system = bndry_equation_systems->get_system("IB coordinates system");
-                NumericVector<double>& actual_coords = *coord_system.current_local_solution;
-                const unsigned int coord_sys_num = coord_system.number();
-
-                // 2. 获取物理受力系统 (这是你刚才用探针查出来的宝藏！)
+                // 获取物理受力系统
                 System& force_system = bndry_equation_systems->get_system("IB force system");
                 NumericVector<double>& actual_forces = *force_system.current_local_solution;
                 const unsigned int force_sys_num = force_system.number();
 
-                // 运动学参数 (保持与 tether 里面一致)
-                const double f = 1.0;
-                const double omega = 2.0 * M_PI * f;
-                const double phi_amp = 40.0 * M_PI / 180.0;
-                const double psi_0   = 90.0 * M_PI / 180.0;
-                const double psi_amp = 45.0 * M_PI / 180.0;
-                const double t_ramp = 0.02;
-                const double tau = 0.1;
-                const double C_val = 1.0 / (M_PI * tau);
-                const double initial_psi = M_PI / 4.0; 
-                
-                const double KAPPA_S = 1.0e6; // 仅用于 Manual 计算核对
-
-                double t = loop_time;
-                double S = 1.0 - exp(-t / t_ramp);
-                double phi = phi_amp * S * sin(omega * t);
-                double tanh_C_cos = tanh(C_val * cos(omega * t));
-                double psi = psi_0 - (psi_amp / tanh(C_val)) * tanh_C_cos;
-
-                // 两个通道的受力累加器
-                double local_Fx_man = 0.0, local_Fy_man = 0.0, local_Fz_man = 0.0;
                 double local_Fx_sys = 0.0, local_Fy_sys = 0.0, local_Fz_sys = 0.0;
 
                 for (MeshBase::node_iterator it = mesh.local_nodes_begin(); it != mesh.local_nodes_end(); ++it)
                 {
                     Node* n = *it;
-                    // 确保节点同时在这两个系统里有注册
-                    if (n->n_vars(coord_sys_num) && n->n_vars(force_sys_num))
+                    if (n->n_vars(force_sys_num))
                     {
-                        // ----- 通道 A: 手动算位移差 (Manual) -----
-                        const libMesh::Point& X_ref = *n; 
-                        double x_flat = X_ref(0);
-                        double y_flat = X_ref(1) * cos(-initial_psi) - X_ref(2) * sin(-initial_psi);
-                        double z_flat = X_ref(1) * sin(-initial_psi) + X_ref(2) * cos(-initial_psi);
-
-                        double x1 = x_flat;
-                        double y1 = y_flat * cos(psi) - z_flat * sin(psi);
-                        double z1 = y_flat * sin(psi) + z_flat * cos(psi);
-                        
-                        double target_x = x1 * cos(phi) - y1 * sin(phi);
-                        double target_y = x1 * sin(phi) + y1 * cos(phi);
-                        double target_z = z1;
-
-                        const int dof_cx = n->dof_number(coord_sys_num, 0, 0);
-                        const int dof_cy = n->dof_number(coord_sys_num, 1, 0);
-                        const int dof_cz = n->dof_number(coord_sys_num, 2, 0);
-                        double actual_x = actual_coords(dof_cx);
-                        double actual_y = actual_coords(dof_cy);
-                        double actual_z = actual_coords(dof_cz);
-
-                        local_Fx_man += -KAPPA_S * (target_x - actual_x);
-                        local_Fy_man += -KAPPA_S * (target_y - actual_y);
-                        local_Fz_man += -KAPPA_S * (target_z - actual_z);
-
-                        // ----- 通道 B: 直接读取底层体力密度 (System) -----
                         const int dof_fx = n->dof_number(force_sys_num, 0, 0);
                         const int dof_fy = n->dof_number(force_sys_num, 1, 0);
                         const int dof_fz = n->dof_number(force_sys_num, 2, 0);
                         
-                        // IBAMR 内部存储的是“固体施加给流体的力”。
-                        // 根据牛顿第三定律，机翼受到的气动力是它的相反数，所以加负号。
-                        local_Fx_sys += -actual_forces(dof_fx);
-                        local_Fy_sys += -actual_forces(dof_fy);
-                        local_Fz_sys += -actual_forces(dof_fz);
+                        // IBAMR内部是固体推流体的力，加负号转为流体对固体的气动力
+                        local_Fx_sys -= actual_forces(dof_fx);
+                        local_Fy_sys -= actual_forces(dof_fy);
+                        local_Fz_sys -= actual_forces(dof_fz);
                     }
                 }
 
                 // 乘以节点控制体积 (黎曼和求积分)
-                // Span(1.0) * Chord(0.3) * Thickness(0.028)
-                double V_total = 1.0 * 0.3 * 0.028; 
-                double total_nodes = mesh.n_nodes(); 
-                double dV = V_total / total_nodes;
+                // ⚠️ 注意：请确保此处的 V_total 匹配你当前的归一化网格真实体积
+                double V_total = 0.5* 1.0 * 0.6 * 0.028; 
+                double dV = V_total / mesh.n_nodes();
 
-                local_Fx_man *= dV; local_Fy_man *= dV; local_Fz_man *= dV;
-                local_Fx_sys *= dV; local_Fy_sys *= dV; local_Fz_sys *= dV;
+                local_Fx_sys *= dV; 
+                local_Fy_sys *= dV; 
+                local_Fz_sys *= dV;
 
-                // MPI 并行规约合并 (6 个变量一起合并)
-                double global_F[6] = {local_Fx_man, local_Fy_man, local_Fz_man, 
-                                      local_Fx_sys, local_Fy_sys, local_Fz_sys};
-                SAMRAI_MPI::sumReduction(global_F, 6);
+                // MPI 并行规约合并 (仅需合并 3 个变量)
+                double global_F[3] = {local_Fx_sys, local_Fy_sys, local_Fz_sys};
+                SAMRAI_MPI::sumReduction(global_F, 3);
 
                 // 写入 CSV
                 if (SAMRAI_MPI::getRank() == 0) {
                     force_file << loop_time << "," 
-                               << global_F[0] << "," << global_F[1] << "," << global_F[2] << ","
-                               << global_F[3] << "," << global_F[4] << "," << global_F[5] << "\n";
+                               << global_F[0] << "," << global_F[1] << "," << global_F[2] << "\n";
                     force_file.flush(); 
                 }
             }

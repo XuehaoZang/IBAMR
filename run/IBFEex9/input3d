@@ -1,13 +1,13 @@
-   // physical parameters
-   Re = 1.30
-   RHO = 1.0
-   MU = 0.6444       // 对应 R=1.0, c=0.3 的绝对无量纲参数
+// physical parameters
+Re = 1.30
+RHO = 1.0
+MU = 0.6444       // 对应 R=1.0, c=0.3 的绝对无量纲参数
 
-   // grid spacing parameters
-   L = 8.0                                       // width of computational domain
-   MAX_LEVELS = 4                                 // maximum number of levels in locally refined grid
-   REF_RATIO  = 2                                 // refinement ratio between levels
-   N = 16                                         // actual    number of grid cells on coarsest grid level
+// grid spacing parameters
+L = 8.0                                       // width of computational domain
+MAX_LEVELS = 3                                 // maximum number of levels in locally refined grid
+REF_RATIO  = 2                                 // refinement ratio between levels
+N = 16                                         // actual    number of grid cells on coarsest grid level
 NFINEST = (REF_RATIO^(MAX_LEVELS - 1))*N       // effective number of grid cells on finest   grid level
 DX0 = L/N                                      // mesh width on coarsest grid level
 DX  = L/NFINEST                                // mesh width on finest   grid level
@@ -27,7 +27,7 @@ SOLVER_TYPE                = "STAGGERED"       // the fluid solver to use (STAGG
 CFL_MAX                    = 0.1               // maximum CFL number
 DT                         = 0.1*CFL_MAX*DX    // maximum timestep size
 START_TIME                 = 0.0e0             // initial simulation time
-END_TIME                   = 2.0e0             // final simulation time
+END_TIME                   = 4.0e0             // final simulation time
 GROW_DT                    = 2.0e0             // growth factor for timesteps
 CONVECTIVE_TS_TYPE         = "ADAMS_BASHFORTH" // convective time stepping type
 CONVECTIVE_OP_TYPE         = "PPM"             // convective differencing discretization type
